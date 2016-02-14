@@ -171,11 +171,8 @@ static int osprd_close_last(struct inode *inode, struct file *filp)
 		// This line avoids compiler warnings; you may remove it.
 		(void)filp_writable, (void)d;
 
-		//eprintk("Hello");
-
 		osp_spin_lock(&d->mutex);
 
-		d->ticket_tail = d->ticket_head;
 		filp->f_flags &= (~F_OSPRD_LOCKED);
 
 		d->num_write_locks = 0;
@@ -184,6 +181,7 @@ static int osprd_close_last(struct inode *inode, struct file *filp)
 		osp_spin_unlock(&d->mutex);
 
 		wake_up_all(&d->blockq);
+		d->ticket_tail = d->ticket_head;
 	}
 
 	return 0;
