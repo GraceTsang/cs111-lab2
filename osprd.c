@@ -34,7 +34,7 @@
 MODULE_LICENSE("Dual BSD/GPL");
 MODULE_DESCRIPTION("CS 111 RAM Disk");
 // EXERCISE: Pass your names into the kernel as the module's authors.
-MODULE_AUTHOR("Skeletor");
+MODULE_AUTHOR("Grace Tsang");
 
 #define OSPRD_MAJOR	222
 
@@ -175,6 +175,7 @@ static int osprd_close_last(struct inode *inode, struct file *filp)
 
 		if ((filp->f_flags & F_OSPRD_LOCKED) != F_OSPRD_LOCKED)
 			return 0;
+
 		filp->f_flags &= (~F_OSPRD_LOCKED);
 
 		osp_spin_lock(&d->mutex);
@@ -185,9 +186,10 @@ static int osprd_close_last(struct inode *inode, struct file *filp)
 		
 		wake_up_all(&d->blockq);
 		osp_spin_lock(&d->mutex);
-//		if ()	//???
+		if (d->ticket_tail + d->num_in_limbo == d->ticket_head){
 			d->ticket_tail += d->num_in_limbo;
-		d->num_in_limbo = 0;
+			d->num_in_limbo = 0;
+		}
 		osp_spin_unlock(&d->mutex);
 	}
 
@@ -206,6 +208,7 @@ static int osprd_close_last(struct inode *inode, struct file *filp)
 int osprd_ioctl(struct inode *inode, struct file *filp,
 	unsigned int cmd, unsigned long arg)
 {
+	unsigned local_ticket;
 	osprd_info_t *d = file2osprd(filp);	// device info
 	int r = 0;			// return value: initially 0
 
@@ -257,7 +260,7 @@ int osprd_ioctl(struct inode *inode, struct file *filp,
 		// Your code here (instead of the next two lines).
 
 		osp_spin_lock(&d->mutex);
-		unsigned local_ticket = d->ticket_head;
+		local_ticket = d->ticket_head;
 		d->ticket_head++;
 		osp_spin_unlock(&d->mutex);
 
@@ -265,20 +268,16 @@ int osprd_ioctl(struct inode *inode, struct file *filp,
 												&& (d->num_read_locks == 0 || !filp_writable)
 												&& d->ticket_tail == local_ticket)) {
 			osp_spin_lock(&d->mutex);
-			if (d->ticket_tail == local_ticket) {
+			if (d->ticket_tail == local_ticket)
 				d->ticket_tail++;
-				eprintk("ticket tail is the same as local ticket\n");
-			}
 			else
-			{
-				d->num_in_limbo++;
-				eprintk("ticket tail is not the same as local ticket\n");
-			}			
+				d->num_in_limbo++;			
 			osp_spin_unlock(&d->mutex);
 			return -ERESTARTSYS;
 		}
 
 		osp_spin_lock(&d->mutex);
+
 		filp->f_flags |= F_OSPRD_LOCKED;
 
 		if (filp_writable)
@@ -299,7 +298,7 @@ int osprd_ioctl(struct inode *inode, struct file *filp,
 
 		// Your code here (instead of the next two lines).
 		osp_spin_lock(&d->mutex);
-		unsigned local_ticket = d->ticket_head;
+		local_ticket = d->ticket_head;
 		d->ticket_head++;
 		osp_spin_unlock(&d->mutex);
 		
@@ -333,22 +332,22 @@ int osprd_ioctl(struct inode *inode, struct file *filp,
 		// you need, and return 0.
 
 		// Your code here (instead of the next line).
-		/*
-		if ((filp->f_flags & F_OSPRD_LOCKED) == 0)
+		
+		if ((filp->f_flags & F_OSPRD_LOCKED) != F_OSPRD_LOCKED)
 			return -EINVAL;
-
 		filp->f_flags &= (~F_OSPRD_LOCKED);
 
 		osp_spin_lock(&d->mutex);
-
-		d->ticket_tail = d->ticket_head;
 		d->num_write_locks = 0;
 		d->num_read_locks = 0;
-		d->num_in_limbo = 0;
-
 		osp_spin_unlock(&d->mutex);
+		
 		wake_up_all(&d->blockq);
-		*/
+		osp_spin_lock(&d->mutex);
+//		if ()	//???
+			d->ticket_tail += d->num_in_limbo;
+		d->num_in_limbo = 0;
+		osp_spin_unlock(&d->mutex);
 	}
 	else
 		r = -ENOTTY; /* unknown command */
