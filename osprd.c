@@ -344,8 +344,10 @@ int osprd_ioctl(struct inode *inode, struct file *filp,
 		
 		wake_up_all(&d->blockq);
 		osp_spin_lock(&d->mutex);
-//		if ()	//???
+		if (d->ticket_tail + d->num_in_limbo == d->ticket_head){
 			d->ticket_tail += d->num_in_limbo;
+			d->num_in_limbo = 0;
+		}
 		d->num_in_limbo = 0;
 		osp_spin_unlock(&d->mutex);
 	}
