@@ -68,6 +68,8 @@ typedef struct osprd_info {
 
 	int num_in_limbo;
 
+	int deadlocked;
+
 	/* HINT: You may want to add additional fields to help
 	in detecting deadlock. */
 
@@ -154,6 +156,11 @@ static int osprd_open(struct inode *inode, struct file *filp)
 	return 0;
 }
 
+void check_deadlock(struct file *filp, osprd_info_t *d)
+{
+	if (file2osprd(filp) == d)
+		d->deadlocked++;
+}
 
 // This function is called when a /dev/osprdX file is finally closed.
 // (If the file descriptor was dup2ed, this function is called only when the
@@ -190,6 +197,7 @@ static int osprd_close_last(struct inode *inode, struct file *filp)
 			d->ticket_tail += d->num_in_limbo;
 			d->num_in_limbo = 0;
 		}
+		d->deadlocked = 0;
 		osp_spin_unlock(&d->mutex);
 	}
 
@@ -262,6 +270,16 @@ int osprd_ioctl(struct inode *inode, struct file *filp,
 		osp_spin_lock(&d->mutex);
 		local_ticket = d->ticket_head;
 		d->ticket_head++;
+		d->deadlocked = 0;
+		osp_spin_unlock(&d->mutex);
+
+		for_each_open_file(current, check_deadlock, d);
+
+		osp_spin_lock(&d->mutex);
+		if (d->deadlocked > 1){
+			osp_spin_unlock(&d->mutex);
+			return -EDEADLOCK;
+		}
 		osp_spin_unlock(&d->mutex);
 
 		if (wait_event_interruptible(d->blockq, d->num_write_locks == 0
@@ -300,6 +318,16 @@ int osprd_ioctl(struct inode *inode, struct file *filp,
 		osp_spin_lock(&d->mutex);
 		local_ticket = d->ticket_head;
 		d->ticket_head++;
+		d->deadlocked = 0;
+		osp_spin_unlock(&d->mutex);
+
+		for_each_open_file(current, check_deadlock, d);
+
+		osp_spin_lock(&d->mutex);
+		if (d->deadlocked > 1){
+			osp_spin_unlock(&d->mutex);
+			return -EBUSY;
+		}
 		osp_spin_unlock(&d->mutex);
 		
 		if (!(d->num_write_locks == 0
@@ -347,8 +375,8 @@ int osprd_ioctl(struct inode *inode, struct file *filp,
 		if (d->ticket_tail + d->num_in_limbo == d->ticket_head){
 			d->ticket_tail += d->num_in_limbo;
 			d->num_in_limbo = 0;
+			d->deadlocked = 0;
 		}
-		d->num_in_limbo = 0;
 		osp_spin_unlock(&d->mutex);
 	}
 	else
@@ -368,6 +396,7 @@ static void osprd_setup(osprd_info_t *d)
 	d->num_write_locks = 0;
 	d->num_read_locks = 0;
 	d->num_in_limbo = 0;
+	d->deadlocked = 0;
 
 	/* Add code here if you add fields to osprd_info_t. */
 }
